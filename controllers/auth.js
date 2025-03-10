@@ -87,16 +87,12 @@ const register = async (req, res, next) => {
       throw new CustomError.BadRequestError("Bu e-posta adresi zaten kayıtlı.");
     }
 
-    //token create
-    const verificationCode = Math.floor(1000 + Math.random() * 9000);
-
     const user = new User({
       name,
       email,
       profile: { picture },
       auth: {
         password,
-        verificationCode
       }
     });
 
@@ -117,12 +113,6 @@ const register = async (req, res, next) => {
       httpOnly: true,
       path: "/v1/auth/refreshtoken",
       maxAge: 30 * 24 * 60 * 60 * 1000, //30 days
-    });
-
-    await sendVerificationEmail({
-      name: user.name,
-      email: user.email,
-      verificationCode: user.auth.verificationCode,
     });
 
     res.json({

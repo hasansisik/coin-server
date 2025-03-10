@@ -42,7 +42,7 @@ const UserSchema = new mongoose.Schema(
       lowercase: true,
     },
     role: { type: String, enum: ["admin", "user","editör"], default: "user" },
-    isVerified: { type: Boolean, default: false },
+    isVerified: { type: Boolean, default: true },
     address: AddressSchema,
     auth: AuthSchema, 
     profile: ProfileSchema, 

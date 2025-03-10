@@ -52,57 +52,6 @@ const getFooter = async (req, res) => {
   }
 };
 
-// Update aboutUs
-const updateAboutUs = async (req, res) => {
-  try {
-    const { aboutUs } = req.body;
-    let footer = await Footer.findOne();
-    if (!footer) {
-      footer = await Footer.create({ aboutUs });
-    } else {
-      footer.aboutUs = aboutUs;
-      await footer.save();
-    }
-    res.status(200).json(footer);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Update copyright
-const updateCopyright = async (req, res) => {
-  try {
-    const { copyright } = req.body;
-    let footer = await Footer.findOne();
-    if (!footer) {
-      footer = await Footer.create({ copyright });
-    } else {
-      footer.copyright = copyright;
-      await footer.save();
-    }
-    res.status(200).json(footer);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Update cookie policy
-const updateCookiePolicy = async (req, res) => {
-  try {
-    const { title, content } = req.body;
-    let footer = await Footer.findOne();
-    if (!footer) {
-      footer = await Footer.create({ cookiePolicy: { title, content } });
-    } else {
-      footer.cookiePolicy = { title, content };
-      await footer.save();
-    }
-    res.status(200).json(footer);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
 // Update KVK
 const updateKvk = async (req, res) => {
   try {
@@ -162,56 +111,9 @@ const deleteSocialMenuItem = async (req, res) => {
   }
 };
 
-// Add form submission
-const addFormSubmission = async (req, res) => {
-  try {
-    const { email, message } = req.body;
-    let footer = await Footer.findOne();
-    if (!footer) {
-      footer = await Footer.create({ forms: [{ email, message, createdAt: new Date() }] });
-    } else {
-      footer.forms.push({ email, message, createdAt: new Date() });
-      await footer.save();
-    }
-    res.status(200).json(footer);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Delete form submission
-const deleteFormSubmission = async (req, res) => {
-  try {
-    const { formId } = req.params;
-    const footer = await Footer.findOne();
-    
-    if (!footer) {
-      return res.status(404).json({ message: "Footer not found" });
-    }
-
-    const formIndex = footer.forms.findIndex(form => form._id.toString() === formId);
-    
-    if (formIndex === -1) {
-      return res.status(404).json({ message: "Form submission not found" });
-    }
-
-    footer.forms.splice(formIndex, 1);
-    await footer.save();
-
-    res.status(200).json({ message: "Form submission deleted successfully" });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
 module.exports = {
   getFooter,
-  updateAboutUs,
-  updateCopyright,
-  updateCookiePolicy,
   updateKvk,
-  addFormSubmission,
-  deleteFormSubmission,
   initializeFooter,
   updateSocialMenu,
   deleteSocialMenuItem
