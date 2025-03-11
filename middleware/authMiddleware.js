@@ -16,8 +16,8 @@ const isAuthenticated = async function (req, res, next) {
 };
 
 const isAdmin = async function (req, res, next) {
-  if (req.user.role !== "admin") {
-    return next(createHttpError.Unauthorized());
+  if (!req.user || req.user.role !== "admin") {
+    return next(createHttpError.Unauthorized("Admin yetkisi gerekli"));
   }
   next();
 };

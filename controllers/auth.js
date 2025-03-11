@@ -355,11 +355,10 @@ const getAllUsers = async (req, res) => {
 const editUsers = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { role, status } = req.body;
+    const { name, email, role, status, password } = req.body;
 
     const admin = await User.findById(req.user.userId);
 
-    // Check if the requesting user is admin
     if (admin.role !== 'admin') {
       return res.status(StatusCodes.FORBIDDEN).json({ 
         message: "Bu işlemi sadece admin yapabilir" 
@@ -374,17 +373,47 @@ const editUsers = async (req, res) => {
     }
 
     // Update user fields if provided
+    if (name) user.name = name;
     if (role) user.role = role;
     if (status !== undefined) user.status = status;
+    if (password) user.auth.password = password;
+
+    // Handle email change
+    if (email && email !== user.email) {
+      const emailExists = await User.findOne({ email });
+      if (emailExists) {
+        return res.status(StatusCodes.BAD_REQUEST).json({
+          message: "Bu e-posta adresi zaten kayıtlı"
+        });
+      }
+      const verificationCode = Math.floor(1000 + Math.random() * 9000);
+      user.email = email;
+      user.isVerified = false;
+      user.auth.verificationCode = verificationCode;
+
+      await sendVerificationEmail({
+        name: user.name,
+        email: email,
+        verificationCode: verificationCode,
+      });
+    }
 
     await user.save();
 
     res.status(StatusCodes.OK).json({ 
-      message: "Kullanıcı bilgileri güncellendi",
-      user 
+      message: email && email !== user.email 
+        ? "Kullanıcı güncellendi. Yeni email doğrulanması gerekiyor."
+        : "Kullanıcı başarıyla güncellendi",
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        isVerified: user.isVerified
+      }
     });
   } catch (error) {
-    console.error("Error in editUsers:", error);
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
       message: "Kullanıcı güncellenirken bir hata oluştu",
       error: error.message
