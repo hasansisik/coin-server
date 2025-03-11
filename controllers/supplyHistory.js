@@ -8,25 +8,46 @@ const getMarketData = async () => {
   try {
     let allCoins = [];
     
-    // 5 sayfa veri çek (her sayfada 100 coin)
+    // Her sayfa için retry mekanizması ile veri çekme
     for (let page = 1; page <= 5; page++) {
-      console.log(`Fetching page ${page}...`);
-      
-      const response = await axios.get(`${COINGECKO_API}/coins/markets`, {
-        params: {
-          vs_currency: 'usd',
-          order: 'market_cap_desc',
-          per_page: 100,
-          page: page,
-          sparkline: false
+      let retryCount = 0;
+      const maxRetries = 3;
+      let success = false;
+
+      while (!success && retryCount < maxRetries) {
+        try {
+          console.log(`Fetching page ${page}, attempt ${retryCount + 1}...`);
+          
+          const response = await axios.get(`${COINGECKO_API}/coins/markets`, {
+            params: {
+              vs_currency: 'usd',
+              order: 'market_cap_desc',
+              per_page: 100,
+              page: page,
+              sparkline: false
+            }
+          });
+          
+          allCoins = [...allCoins, ...response.data];
+          success = true;
+          
+          // Başarılı istekten sonra 65 saniye bekle (rate limit yenilenme süresi)
+          console.log(`Page ${page} fetched successfully. Waiting for rate limit reset...`);
+          await new Promise(resolve => setTimeout(resolve, 65000));
+          
+        } catch (error) {
+          retryCount++;
+          if (error.response && error.response.status === 429) {
+            const retryAfter = error.response.headers['retry-after'] || 65;
+            console.log(`Rate limit hit. Waiting ${retryAfter} seconds before retry...`);
+            await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+          } else if (retryCount === maxRetries) {
+            throw error;
+          } else {
+            console.log(`Error occurred, retrying in 65 seconds...`);
+            await new Promise(resolve => setTimeout(resolve, 65000));
+          }
         }
-      });
-      
-      allCoins = [...allCoins, ...response.data];
-      
-      // Rate limit'e takılmamak için bekle
-      if (page < 5) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
 
@@ -190,7 +211,7 @@ const saveCurrentSupplies = async () => {
             update: { 
               $push: { 
                 dailySupplies: {
-                  totalSupply: coin.total_supply || coin.circulating_supply || 0,
+                  circulatingSupply: coin.circulating_supply || 0,
                   timestamp: new Date()
                 }
               }

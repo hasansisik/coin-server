@@ -5,10 +5,10 @@ const SupplyHistorySchema = new mongoose.Schema({
     type: String,
     required: true,
     unique: true,
-    uppercase: true // Uppercase olarak kaydedilecek
+    uppercase: true
   },
   dailySupplies: [{
-    totalSupply: {
+    circulatingSupply: {
       type: Number,
       required: true
     },
