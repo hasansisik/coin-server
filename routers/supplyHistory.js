@@ -4,12 +4,12 @@ const {
   getSupplyHistory,
   getLatestSupplyHistory
 } = require("../controllers/supplyHistory");
-const { isAuthenticated } = require("../middleware/authMiddleware");
 
 const router = express.Router();
 
-router.post("/", isAuthenticated, saveSupplyHistory);
-router.get("/", isAuthenticated, getSupplyHistory);
-router.get("/latest", isAuthenticated, getLatestSupplyHistory);
+// Authentication middleware'i kaldırıyoruz
+router.post("/", saveSupplyHistory);
+router.get("/", getSupplyHistory);
+router.get("/latest", getLatestSupplyHistory);
 
 module.exports = router;
