@@ -4,6 +4,7 @@ require("express-async-errors");
 const cors = require("cors");
 const express = require("express");
 const app = express();
+const cron = require('node-cron');
 app.use(cors());
 
 // rest of the packages
@@ -16,6 +17,9 @@ const connectDB = require("./config/connectDB");
 //routers
 const authRouter = require("./routers/auth");
 const footerRouter = require("./routers/footerRoutes");
+const supplyHistoryRouter = require("./routers/supplyHistory");
+const { saveCurrentSupplies } = require('./controllers/supplyHistory');
+
 
 //midlleware
 const notFoundMiddleware = require("./middleware/not-found");
@@ -30,6 +34,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/v1/auth", authRouter);
 app.use("/v1/footer", footerRouter);
+app.use("/v1/supply-history", supplyHistoryRouter);
 
 app.use(notFoundMiddleware);
 app.use(erorHandlerMiddleware);
@@ -49,5 +54,15 @@ const start = async () => {
     console.log(error);
   }
 };
+
+cron.schedule('0 0 * * *', async () => {
+  console.log('Running supply history cron job...');
+  try {
+    await saveCurrentSupplies();
+    console.log('Supply history cron job completed successfully');
+  } catch (error) {
+    console.error('Supply history cron job failed:', error);
+  }
+});
 
 start();
