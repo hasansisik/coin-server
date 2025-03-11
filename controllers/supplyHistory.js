@@ -33,19 +33,19 @@ const getMarketData = async () => {
           
           // Başarılı istekten sonra 65 saniye bekle (rate limit yenilenme süresi)
           console.log(`Page ${page} fetched successfully. Waiting for rate limit reset...`);
-          await new Promise(resolve => setTimeout(resolve, 65000));
+          await new Promise(resolve => setTimeout(resolve, 15000));
           
         } catch (error) {
           retryCount++;
           if (error.response && error.response.status === 429) {
-            const retryAfter = error.response.headers['retry-after'] || 65;
+            const retryAfter = error.response.headers['retry-after'] || 15;
             console.log(`Rate limit hit. Waiting ${retryAfter} seconds before retry...`);
             await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
           } else if (retryCount === maxRetries) {
             throw error;
           } else {
             console.log(`Error occurred, retrying in 65 seconds...`);
-            await new Promise(resolve => setTimeout(resolve, 65000));
+            await new Promise(resolve => setTimeout(resolve, 15000));
           }
         }
       }
@@ -84,29 +84,51 @@ const getCoinSymbols = async () => {
 
 const saveSupplyHistory = async (req, res) => {
   try {
-    const { symbol, totalSupply, period } = req.body;
+    const { symbol, circulatingSupply } = req.body;
     
-    if (!['1d', '1w', '1m', '1y'].includes(period)) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Bugün için kayıt var mı kontrol et
+    const existingRecord = await SupplyHistory.findOne({
+      symbol,
+      'dailySupplies.timestamp': {
+        $gte: today,
+        $lt: tomorrow
+      }
+    });
+
+    if (existingRecord) {
       return res.status(StatusCodes.BAD_REQUEST).json({
-        message: "Geçersiz periyod. Kullanılabilir periyodlar: 1d, 1w, 1m, 1y"
+        success: false,
+        message: "Bu gün için zaten kayıt mevcut"
       });
     }
 
-    const history = new SupplyHistory({
-      symbol,
-      totalSupply,
-      period
-    });
-
-    await history.save();
+    // Yeni kayıt oluştur veya mevcut kayda ekle
+    await SupplyHistory.updateOne(
+      { symbol },
+      {
+        $push: {
+          dailySupplies: {
+            circulatingSupply,
+            timestamp: new Date()
+          }
+        }
+      },
+      { upsert: true }
+    );
 
     res.status(StatusCodes.CREATED).json({
       success: true,
-      history
+      message: "Supply kaydedildi"
     });
   } catch (error) {
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      message: "Supply history kaydedilirken hata oluştu",
+      message: "Supply kaydedilirken hata oluştu",
       error: error.message
     });
   }
@@ -190,49 +212,75 @@ const checkDailyData = async () => {
 
 const saveCurrentSupplies = async () => {
   try {
-    const hasDataForToday = await checkDailyData();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     
-    if (hasDataForToday) {
-      console.log('Data already exists for today, skipping...');
-      return { success: true, message: 'Data already exists for today' };
-    }
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
     const marketData = await getMarketData();
     const symbolMapping = await getCoinSymbols();
     console.log(`Processing ${marketData.length} coins from CoinGecko...`);
     
-    const bulkOps = marketData
-      .filter(coin => coin.total_supply !== null && coin.total_supply !== undefined)
-      .map(coin => {
+    // Her symbol için ilk gelen veriyi saklayacağız
+    const uniqueCoins = new Map();
+    
+    // Her coin için sadece ilk veriyi al
+    marketData
+      .filter(c => c.circulating_supply)
+      .forEach(coin => {
         const symbol = symbolMapping[coin.id] || coin.symbol.toUpperCase();
-        return {
+        // Eğer bu symbol için henüz veri yoksa, kaydet
+        if (!uniqueCoins.has(symbol)) {
+          uniqueCoins.set(symbol, coin.circulating_supply);
+        }
+      });
+
+    const bulkOps = [];
+
+    // Her symbol için o gün kayıt var mı kontrol et
+    for (const [symbol, circulatingSupply] of uniqueCoins) {
+      const existingRecord = await SupplyHistory.findOne({
+        symbol,
+        'dailySupplies.timestamp': {
+          $gte: today,
+          $lt: tomorrow
+        }
+      });
+
+      // Sadece o gün için kaydı olmayan coinleri ekle
+      if (!existingRecord) {
+        bulkOps.push({
           updateOne: {
-            filter: { symbol }, // Artık uppercase symbol kullanıyoruz
-            update: { 
-              $push: { 
+            filter: { symbol },
+            update: {
+              $push: {
                 dailySupplies: {
-                  circulatingSupply: coin.circulating_supply || 0,
+                  circulatingSupply,
                   timestamp: new Date()
                 }
               }
             },
             upsert: true
           }
-        };
-      });
+        });
+      }
+    }
 
     if (bulkOps.length > 0) {
       await SupplyHistory.bulkWrite(bulkOps);
-      console.log(`Successfully processed ${bulkOps.length} coins`);
+      console.log(`Successfully processed ${bulkOps.length} new coins for today`);
     }
 
-    return { success: true, message: `Daily supply history updated successfully for ${bulkOps.length} coins` };
+    return { 
+      success: true, 
+      message: `Daily supply history updated successfully for ${bulkOps.length} coins` 
+    };
   } catch (error) {
     console.error('Error saving daily supply history:', error);
     throw error;
   }
 };
-// setInterval kaldırıldı çünkü cron job kullanıyoruz
 
 const getBulkSupplyHistory = async (req, res) => {
   try {

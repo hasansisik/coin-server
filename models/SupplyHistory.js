@@ -17,8 +17,11 @@ const SupplyHistorySchema = new mongoose.Schema({
       default: Date.now
     }
   }]
+}, {
+  timestamps: true
 });
 
+// Her symbol için dailySupplies içinde timestamp'e göre index
 SupplyHistorySchema.index({ symbol: 1, "dailySupplies.timestamp": -1 });
 
 module.exports = mongoose.model("SupplyHistory", SupplyHistorySchema);
