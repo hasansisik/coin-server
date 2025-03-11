@@ -213,9 +213,46 @@ const saveCurrentSupplies = async () => {
 };
 // setInterval kaldırıldı çünkü cron job kullanıyoruz
 
+const getBulkSupplyHistory = async (req, res) => {
+  try {
+    const { symbols } = req.query;
+    
+    if (!symbols) {
+      return res.status(StatusCodes.BAD_REQUEST).json({
+        success: false,
+        message: 'Symbols parameter is required'
+      });
+    }
+
+    const symbolArray = symbols.split(',').map(s => s.toUpperCase());
+    
+    const histories = await SupplyHistory.find({
+      symbol: { $in: symbolArray }
+    });
+
+    // Convert array to map for easier client-side processing
+    const resultMap = histories.reduce((acc, history) => {
+      acc[history.symbol] = history;
+      return acc;
+    }, {});
+
+    res.status(StatusCodes.OK).json({
+      success: true,
+      data: resultMap
+    });
+  } catch (error) {
+    console.error("Error in getBulkSupplyHistory:", error);
+    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
+      message: "Error fetching bulk supply history",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   saveSupplyHistory,
   getSupplyHistory,
   getLatestSupplyHistory,
-  saveCurrentSupplies
+  saveCurrentSupplies,
+  getBulkSupplyHistory
 };
