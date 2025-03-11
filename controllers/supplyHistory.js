@@ -38,6 +38,29 @@ const getMarketData = async () => {
   }
 };
 
+const getCoinSymbols = async () => {
+  try {
+    const response = await axios.get(`${COINGECKO_API}/coins/markets`, {
+      params: {
+        vs_currency: 'usd',
+        order: 'market_cap_desc',
+        per_page: 250,
+        sparkline: false
+      }
+    });
+
+    const symbolMapping = {};
+    response.data.forEach(coin => {
+      symbolMapping[coin.id] = coin.symbol.toUpperCase();
+    });
+
+    return symbolMapping;
+  } catch (error) {
+    console.error('Error fetching coin symbols:', error);
+    return {};
+  }
+};
+
 const saveSupplyHistory = async (req, res) => {
   try {
     const { symbol, totalSupply, period } = req.body;
@@ -93,26 +116,35 @@ const getSupplyHistory = async (req, res) => {
 const getLatestSupplyHistory = async (req, res) => {
   try {
     const { symbol } = req.query;
+    console.log('Received request for symbol:', symbol);
     
-    const latestHistory = {};
-    for (const period of ['1d', '1w', '1m', '1y']) {
-      const latest = await SupplyHistory.findOne({ 
-        symbol,
-        period
-      }).sort({ timestamp: -1 });
-      
-      if (latest) {
-        latestHistory[period] = latest;
-      }
+    if (!symbol) {
+      return res.status(StatusCodes.BAD_REQUEST).json({
+        success: false,
+        message: 'Symbol is required'
+      });
+    }
+    
+    // Uppercase olarak arama yap
+    const history = await SupplyHistory.findOne({ 
+      symbol: symbol.toUpperCase()
+    });
+    
+    if (!history) {
+      return res.status(StatusCodes.NOT_FOUND).json({
+        success: false,
+        message: `No supply history found for symbol: ${symbol}`
+      });
     }
     
     res.status(StatusCodes.OK).json({
       success: true,
-      history: latestHistory
+      data: history
     });
   } catch (error) {
+    console.error("Error in getLatestSupplyHistory:", error);
     res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      message: "En son supply history alınırken hata oluştu",
+      message: "Supply history alınırken hata oluştu",
       error: error.message
     });
   }
@@ -145,24 +177,28 @@ const saveCurrentSupplies = async () => {
     }
 
     const marketData = await getMarketData();
+    const symbolMapping = await getCoinSymbols();
     console.log(`Processing ${marketData.length} coins from CoinGecko...`);
     
     const bulkOps = marketData
       .filter(coin => coin.total_supply !== null && coin.total_supply !== undefined)
-      .map(coin => ({
-        updateOne: {
-          filter: { symbol: coin.id },
-          update: { 
-            $push: { 
-              dailySupplies: {
-                totalSupply: coin.total_supply || coin.circulating_supply || 0,
-                timestamp: new Date()
+      .map(coin => {
+        const symbol = symbolMapping[coin.id] || coin.symbol.toUpperCase();
+        return {
+          updateOne: {
+            filter: { symbol }, // Artık uppercase symbol kullanıyoruz
+            update: { 
+              $push: { 
+                dailySupplies: {
+                  totalSupply: coin.total_supply || coin.circulating_supply || 0,
+                  timestamp: new Date()
+                }
               }
-            }
-          },
-          upsert: true
-        }
-      }));
+            },
+            upsert: true
+          }
+        };
+      });
 
     if (bulkOps.length > 0) {
       await SupplyHistory.bulkWrite(bulkOps);
