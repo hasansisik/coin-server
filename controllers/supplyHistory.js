@@ -216,35 +216,44 @@ const saveCurrentSupplies = async () => {
 const getBulkSupplyHistory = async (req, res) => {
   try {
     const { symbols } = req.query;
-    
-    if (!symbols) {
-      return res.status(StatusCodes.BAD_REQUEST).json({
-        success: false,
-        message: 'Symbols parameter is required'
-      });
-    }
-
     const symbolArray = symbols.split(',').map(s => s.toUpperCase());
-    
-    const histories = await SupplyHistory.find({
+
+    const supplyHistories = await SupplyHistory.find({
       symbol: { $in: symbolArray }
     });
 
-    // Convert array to map for easier client-side processing
-    const resultMap = histories.reduce((acc, history) => {
-      acc[history.symbol] = history;
-      return acc;
-    }, {});
+    // Her sembol için verileri gruplayıp düzenle
+    const formattedData = {};
+    supplyHistories.forEach(history => {
+      // Tarih bazında gruplama yap ve en son veriyi al
+      const groupedSupplies = history.dailySupplies.reduce((acc, supply) => {
+        const date = new Date(supply.timestamp).toISOString().split('T')[0];
+        
+        // Her gün için sadece bir veri al
+        if (!acc[date] || new Date(supply.timestamp) > new Date(acc[date].timestamp)) {
+          acc[date] = supply;
+        }
+        return acc;
+      }, {});
 
-    res.status(StatusCodes.OK).json({
+      // Gruplanmış verileri array'e çevir
+      const sortedSupplies = Object.values(groupedSupplies)
+        .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+      formattedData[history.symbol] = {
+        dailySupplies: sortedSupplies
+      };
+    });
+
+    res.json({
       success: true,
-      data: resultMap
+      data: formattedData
     });
   } catch (error) {
     console.error("Error in getBulkSupplyHistory:", error);
-    res.status(StatusCodes.INTERNAL_SERVER_ERROR).json({
-      message: "Error fetching bulk supply history",
-      error: error.message
+    res.status(500).json({
+      success: false,
+      error: "Internal server error"
     });
   }
 };
