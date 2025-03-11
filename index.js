@@ -55,14 +55,14 @@ const start = async () => {
   }
 };
 
-// Günlük yerine saatlik çalışacak şekilde cron job'ı güncelle
-cron.schedule('0 * * * *', async () => {
-  console.log('Running hourly supply history update...');
+// Günde 2 kere çalışacak cron job (11:00 ve 23:00)
+cron.schedule('0 11,23 * * *', async () => {
+  console.log('Running daily supply history check...');
   try {
     await saveCurrentSupplies();
-    console.log('Hourly supply history update completed successfully');
+    console.log('Daily supply history check completed');
   } catch (error) {
-    console.error('Hourly supply history update failed:', error);
+    console.error('Daily supply history check failed:', error);
   }
 });
 
