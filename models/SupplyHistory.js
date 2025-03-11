@@ -12,7 +12,7 @@ const SupplyHistorySchema = new mongoose.Schema({
   },
   period: {
     type: String,
-    enum: ['1w', '1m', '1y'],
+    enum: ['1d', '1w', '1m', '1y'],
     required: true
   },
   timestamp: {

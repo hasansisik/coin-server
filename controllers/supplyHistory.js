@@ -4,10 +4,11 @@ const axios = require('axios');
 
 const getTimeframeInMS = (period) => {
   switch(period) {
+    case '1d': return 24 * 60 * 60 * 1000;        // 1 gün
     case '1w': return 7 * 24 * 60 * 60 * 1000;    // 1 hafta
     case '1m': return 30 * 24 * 60 * 60 * 1000;   // 1 ay
     case '1y': return 365 * 24 * 60 * 60 * 1000;  // 1 yıl
-    default: return 7 * 24 * 60 * 60 * 1000;      // varsayılan 1 hafta
+    default: return 24 * 60 * 60 * 1000;          // varsayılan 1 gün
   }
 };
 
@@ -15,9 +16,9 @@ const saveSupplyHistory = async (req, res) => {
   try {
     const { symbol, totalSupply, period } = req.body;
     
-    if (!['1w', '1m', '1y'].includes(period)) {
+    if (!['1d', '1w', '1m', '1y'].includes(period)) {
       return res.status(StatusCodes.BAD_REQUEST).json({
-        message: "Geçersiz periyod. Kullanılabilir periyodlar: 1w, 1m, 1y"
+        message: "Geçersiz periyod. Kullanılabilir periyodlar: 1d, 1w, 1m, 1y"
       });
     }
 
@@ -45,9 +46,9 @@ const getSupplyHistory = async (req, res) => {
   try {
     const { symbol, period } = req.query;
     
-    if (!['1w', '1m', '1y'].includes(period)) {
+    if (!['1d', '1w', '1m', '1y'].includes(period)) {
       return res.status(StatusCodes.BAD_REQUEST).json({
-        message: "Geçersiz periyod. Kullanılabilir periyodlar: 1w, 1m, 1y"
+        message: "Geçersiz periyod. Kullanılabilir periyodlar: 1d, 1w, 1m, 1y"
       });
     }
 
@@ -77,7 +78,7 @@ const getLatestSupplyHistory = async (req, res) => {
     const { symbol } = req.query;
     
     const latestHistory = {};
-    for (const period of ['1w', '1m', '1y']) {
+    for (const period of ['1d', '1w', '1m', '1y']) {
       const latest = await SupplyHistory.findOne({ 
         symbol,
         period
@@ -108,6 +109,10 @@ const saveCurrentSupplies = async () => {
         order: 'market_cap_desc',
         per_page: 250,
         sparkline: false
+      },
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Coin Supply Tracker'
       }
     });
 
@@ -116,38 +121,44 @@ const saveCurrentSupplies = async () => {
     }
 
     const coins = response.data;
-    console.log('Current supplies fetched:', coins.length);
     const now = new Date();
+    let savedCount = 0;
+    let errorCount = 0;
 
     for (const coin of coins) {
       if (!coin.symbol) continue;
-      
-      // Mevcut supply'ı tüm periyodlar için ayrı kaydet
-      await Promise.all(['1w', '1m', '1y'].map(async (period) => {
-        try {
-          const existingRecord = await SupplyHistory.findOne({
-            symbol: coin.symbol.toUpperCase(),
-            period,
-            timestamp: {
-              $gte: new Date(now.getTime() - getTimeframeInMS(period))
-            }
-          });
 
-          if (!existingRecord) {
-            await SupplyHistory.create({
-              symbol: coin.symbol.toUpperCase(),
-              totalSupply: coin.total_supply ?? 0,
-              period,
-              timestamp: now
-            });
-            console.log(`Saved ${period} supply for ${coin.symbol}`);
+      try {
+        // Mevcut saat için kayıt var mı kontrol et
+        const startOfHour = new Date(now);
+        startOfHour.setMinutes(0, 0, 0);
+
+        const existingHourlyRecord = await SupplyHistory.findOne({
+          symbol: coin.symbol.toUpperCase(),
+          period: '1d',
+          timestamp: {
+            $gte: startOfHour
           }
-        } catch (err) {
-          console.error(`Error saving ${period} supply for ${coin.symbol}:`, err);
+        });
+
+        // Eğer bu saat için kayıt yoksa yeni kayıt oluştur
+        if (!existingHourlyRecord) {
+          await SupplyHistory.create({
+            symbol: coin.symbol.toUpperCase(),
+            totalSupply: coin.total_supply ?? 0,
+            period: '1d',
+            timestamp: now
+          });
+          savedCount++;
         }
-      }));
+
+      } catch (err) {
+        console.error(`Error saving supply for ${coin.symbol}:`, err);
+        errorCount++;
+      }
     }
 
+    console.log(`Supply history update completed. Saved: ${savedCount}, Errors: ${errorCount}`);
     return true;
   } catch (error) {
     console.error('Error in saveCurrentSupplies:', error);
