@@ -55,8 +55,8 @@ const start = async () => {
   }
 };
 
-// Günde 2 kere çalışacak cron job (11:00 ve 23:00)
-cron.schedule('0 11,23 * * *', async () => {
+// Her gün gece yarısı çalışacak şekilde güncelle
+cron.schedule('0 0 * * *', async () => {
   console.log('Running daily supply history check...');
   try {
     await saveCurrentSupplies();

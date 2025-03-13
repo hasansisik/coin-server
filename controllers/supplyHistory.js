@@ -212,34 +212,29 @@ const checkDailyData = async () => {
 
 const saveCurrentSupplies = async () => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
     const marketData = await getMarketData();
     const symbolMapping = await getCoinSymbols();
     console.log(`Processing ${marketData.length} coins from CoinGecko...`);
     
-    // Her symbol için ilk gelen veriyi saklayacağız
     const uniqueCoins = new Map();
-    
-    // Her coin için sadece ilk veriyi al
     marketData
       .filter(c => c.circulating_supply)
       .forEach(coin => {
         const symbol = symbolMapping[coin.id] || coin.symbol.toUpperCase();
-        // Eğer bu symbol için henüz veri yoksa, kaydet
         if (!uniqueCoins.has(symbol)) {
           uniqueCoins.set(symbol, coin.circulating_supply);
         }
       });
 
     const bulkOps = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // Her symbol için o gün kayıt var mı kontrol et
     for (const [symbol, circulatingSupply] of uniqueCoins) {
+      // Her sembol için o günün kaydı var mı kontrol et
       const existingRecord = await SupplyHistory.findOne({
         symbol,
         'dailySupplies.timestamp': {
@@ -248,7 +243,7 @@ const saveCurrentSupplies = async () => {
         }
       });
 
-      // Sadece o gün için kaydı olmayan coinleri ekle
+      // Eğer o gün için kayıt yoksa ekle
       if (!existingRecord) {
         bulkOps.push({
           updateOne: {
@@ -269,12 +264,14 @@ const saveCurrentSupplies = async () => {
 
     if (bulkOps.length > 0) {
       await SupplyHistory.bulkWrite(bulkOps);
-      console.log(`Successfully processed ${bulkOps.length} new coins for today`);
+      console.log(`Successfully added supply data for ${bulkOps.length} coins`);
+    } else {
+      console.log('No new supply data to add for today');
     }
 
-    return { 
-      success: true, 
-      message: `Daily supply history updated successfully for ${bulkOps.length} coins` 
+    return {
+      success: true,
+      message: `Supply history check completed. Added data for ${bulkOps.length} coins.`
     };
   } catch (error) {
     console.error('Error saving daily supply history:', error);
