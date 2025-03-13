@@ -4,6 +4,7 @@ const {
   getFooter,
   updateKvk,
   initializeFooter,
+  updateInfo,
   updateSocialMenu,
   deleteSocialMenuItem
 } = require('../controllers/footerController');
@@ -16,6 +17,7 @@ router.get('/', getFooter);
 
 // Update sections
 router.put('/kvk', updateKvk);
+router.put('/info', updateInfo);
 router.put('/social-menu', updateSocialMenu);
 router.delete('/social-menu/:itemId', deleteSocialMenuItem);
 

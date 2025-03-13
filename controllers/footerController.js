@@ -1,4 +1,4 @@
-const Footer = require('../models/Footer');
+const Footer = require("../models/Footer");
 
 // Initialize footer with default values
 const initializeFooter = async (req, res) => {
@@ -11,17 +11,15 @@ const initializeFooter = async (req, res) => {
 
     // Create initial footer with default values
     const footer = await Footer.create({
-      aboutUs: "Default About Us Text",
-      copyright: " 2025 Your Company Name. All rights reserved.",
-      cookiePolicy: {
-        title: "Cookie Policy",
-        content: "<p>Default cookie policy content</p>"
+      info: {
+        title: "info header",
+        content: "info content",
       },
       kvk: {
         title: "KVK Aydınlatma Metni",
-        content: "<p>Default KVK content</p>"
+        content: "Default KVK content",
       },
-      forms: []
+      forms: [],
     });
 
     res.status(201).json(footer);
@@ -36,14 +34,14 @@ const getFooter = async (req, res) => {
     let footer = await Footer.findOne();
     if (!footer) {
       footer = await Footer.create({
-        cookiePolicy: {
-          title: "Cookie Policy",
-          content: "<p>Default cookie policy content</p>"
+        info: {
+          title: "info header",
+          content: "info content",
         },
         kvk: {
           title: "KVK Aydınlatma Metni",
-          content: "<p>Default KVK content</p>"
-        }
+          content: "Default KVK content",
+        },
       });
     }
     res.status(200).json(footer);
@@ -69,13 +67,32 @@ const updateKvk = async (req, res) => {
   }
 };
 
+// update info
+const updateInfo = async (req, res) => {
+  try {
+    const { title, content } = req.body;
+    let footer = await Footer.findOne();
+    if (!footer) {
+      footer = await Footer.create({ info: { title, content } });
+    } else {
+      footer.info = { title, content };
+      await footer.save();
+    }
+    res.status(200).json(footer);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
 // Update social menu
 const updateSocialMenu = async (req, res) => {
   try {
     const socialMenuItems = req.body;
 
     if (!Array.isArray(socialMenuItems) || socialMenuItems.length === 0) {
-      return res.status(400).json({ message: "Social menu items are required" });
+      return res
+        .status(400)
+        .json({ message: "Social menu items are required" });
     }
 
     let footer = await Footer.findOne();
@@ -98,10 +115,14 @@ const deleteSocialMenuItem = async (req, res) => {
     let footer = await Footer.findOne();
 
     if (!footer || !footer.socialMenu) {
-      return res.status(404).json({ message: "Footer or social menu not found" });
+      return res
+        .status(404)
+        .json({ message: "Footer or social menu not found" });
     }
 
-    footer.socialMenu = footer.socialMenu.filter(item => item._id.toString() !== itemId);
+    footer.socialMenu = footer.socialMenu.filter(
+      (item) => item._id.toString() !== itemId
+    );
     await footer.save();
 
     res.status(200).json(footer);
@@ -114,7 +135,8 @@ const deleteSocialMenuItem = async (req, res) => {
 module.exports = {
   getFooter,
   updateKvk,
+  updateInfo,
   initializeFooter,
   updateSocialMenu,
-  deleteSocialMenuItem
+  deleteSocialMenuItem,
 };

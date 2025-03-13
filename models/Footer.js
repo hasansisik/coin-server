@@ -1,6 +1,10 @@
 const mongoose = require('mongoose');
 
 const footerSchema = new mongoose.Schema({
+  info: {
+    title: { type: String, required: true },
+    content: { type: String, required: true }
+  },
   kvk: {
     title: { type: String, required: true },
     content: { type: String, required: true }
