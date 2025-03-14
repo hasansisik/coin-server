@@ -55,14 +55,24 @@ const start = async () => {
   }
 };
 
-// Her gün gece yarısı çalışacak şekilde güncelle
-cron.schedule('0 0 * * *', async () => {
-  console.log('Running daily supply history check...');
+// Günde 3 kez çalışacak şekilde ayarla (00:00, 12:00, 02:40)
+cron.schedule('0 0,12 * * *', async () => {
+  console.log('Running scheduled supply history check...');
   try {
     await saveCurrentSupplies();
-    console.log('Daily supply history check completed');
+    console.log('Scheduled supply history check completed');
   } catch (error) {
-    console.error('Daily supply history check failed:', error);
+    console.error('Scheduled supply history check failed:', error);
+  }
+});
+
+cron.schedule('40 2 * * *', async () => {
+  console.log('Running night supply history check...');
+  try {
+    await saveCurrentSupplies();
+    console.log('Night supply history check completed');
+  } catch (error) {
+    console.error('Night supply history check failed:', error);
   }
 });
 

@@ -212,6 +212,26 @@ const checkDailyData = async () => {
 
 const saveCurrentSupplies = async () => {
   try {
+    // Şu anki saat kontrolü
+    const now = new Date();
+    const hour = now.getHours();
+    const minute = now.getMinutes();
+    
+    // Sadece belirli saatlerde çalışmasına izin ver (00:00, 12:00, 02:40 ±5 dakika)
+    const isValidTime = (
+      (hour === 0 && minute < 5) || 
+      (hour === 12 && minute < 5) || 
+      (hour === 6 && minute >= 35 && minute <= 45)
+    );
+
+    if (!isValidTime) {
+      console.log('Not in scheduled time window, skipping supply update');
+      return {
+        success: false,
+        message: 'Not in scheduled time window'
+      };
+    }
+
     const marketData = await getMarketData();
     const symbolMapping = await getCoinSymbols();
     console.log(`Processing ${marketData.length} coins from CoinGecko...`);
@@ -243,36 +263,60 @@ const saveCurrentSupplies = async () => {
         }
       });
 
-      // Eğer o gün için kayıt yoksa ekle
       if (!existingRecord) {
-        bulkOps.push({
-          updateOne: {
-            filter: { symbol },
-            update: {
-              $push: {
-                dailySupplies: {
-                  circulatingSupply,
-                  timestamp: new Date()
+        // Sembol için kayıt var mı kontrol et
+        const symbolRecord = await SupplyHistory.findOne({ symbol });
+
+        if (symbolRecord) {
+          // Mevcut kayıt varsa dailySupplies'a ekle
+          bulkOps.push({
+            updateOne: {
+              filter: { symbol },
+              update: {
+                $push: {
+                  dailySupplies: {
+                    circulatingSupply,
+                    timestamp: new Date()
+                  }
                 }
               }
-            },
-            upsert: true
-          }
-        });
+            }
+          });
+        } else {
+          // Hiç kayıt yoksa yeni kayıt oluştur
+          bulkOps.push({
+            updateOne: {
+              filter: { symbol },
+              update: {
+                $set: {
+                  symbol,
+                  dailySupplies: [{
+                    circulatingSupply,
+                    timestamp: new Date()
+                  }]
+                }
+              },
+              upsert: true
+            }
+          });
+        }
       }
     }
 
     if (bulkOps.length > 0) {
-      await SupplyHistory.bulkWrite(bulkOps);
-      console.log(`Successfully added supply data for ${bulkOps.length} coins`);
+      const result = await SupplyHistory.bulkWrite(bulkOps);
+      console.log(`Successfully updated/added supply data for ${bulkOps.length} coins`);
+      return {
+        success: true,
+        message: `Supply history updated. Modified ${result.modifiedCount} records.`
+      };
     } else {
       console.log('No new supply data to add for today');
+      return {
+        success: true,
+        message: 'All coins already have today\'s supply data.'
+      };
     }
-
-    return {
-      success: true,
-      message: `Supply history check completed. Added data for ${bulkOps.length} coins.`
-    };
   } catch (error) {
     console.error('Error saving daily supply history:', error);
     throw error;
