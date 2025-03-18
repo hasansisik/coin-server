@@ -1,6 +1,9 @@
 const mongoose = require('mongoose');
 
 const footerSchema = new mongoose.Schema({
+  login: {
+    content: { type: String, required: true }
+  },
   info: {
     title: { type: String, required: true },
     content: { type: String, required: true }

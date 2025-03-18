@@ -84,6 +84,22 @@ const updateInfo = async (req, res) => {
   }
 }
 
+const updateLogin = async (req, res) => {
+  try {
+    const { content } = req.body;
+    let footer = await Footer.findOne();
+    if (!footer) {
+      footer = await Footer.create({ login: {content } });
+    } else {
+      footer.login = { content };
+      await footer.save();
+    }
+    res.status(200).json(footer);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
 // Update social menu
 const updateSocialMenu = async (req, res) => {
   try {
@@ -135,6 +151,7 @@ const deleteSocialMenuItem = async (req, res) => {
 module.exports = {
   getFooter,
   updateKvk,
+  updateLogin,
   updateInfo,
   initializeFooter,
   updateSocialMenu,

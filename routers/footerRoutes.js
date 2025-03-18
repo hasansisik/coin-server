@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   getFooter,
   updateKvk,
+  updateLogin,
   initializeFooter,
   updateInfo,
   updateSocialMenu,
@@ -16,6 +17,7 @@ router.post('/initialize', initializeFooter);
 router.get('/', getFooter);
 
 // Update sections
+router.put('/login', updateLogin);
 router.put('/kvk', updateKvk);
 router.put('/info', updateInfo);
 router.put('/social-menu', updateSocialMenu);
