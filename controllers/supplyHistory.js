@@ -51,7 +51,6 @@ const getMarketData = async () => {
       }
     }
 
-    console.log(`Total coins fetched: ${allCoins.length}`);
     return allCoins;
   } catch (error) {
     console.error('Error fetching market data:', error);
@@ -212,23 +211,26 @@ const checkDailyData = async () => {
 
 const saveCurrentSupplies = async () => {
   try {
-    // Şu anki saat kontrolü
-    const now = new Date();
-    const hour = now.getHours();
-    const minute = now.getMinutes();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     
-    // Sadece belirli saatlerde çalışmasına izin ver (00:00, 12:00, 02:40 ±5 dakika)
-    const isValidTime = (
-      (hour === 0 && minute < 5) || 
-      (hour === 12 && minute < 5) || 
-      (hour === 6 && minute >= 35 && minute <= 45)
-    );
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-    if (!isValidTime) {
-      console.log('Not in scheduled time window, skipping supply update');
+    // Bugün için veri var mı kontrol et
+    const todaysData = await SupplyHistory.findOne({
+      'dailySupplies.timestamp': {
+        $gte: today,
+        $lt: tomorrow
+      }
+    });
+
+    // Eğer bugün için veri varsa işlemi atla
+    if (todaysData) {
+      console.log('Today\'s data already exists, skipping...');
       return {
-        success: false,
-        message: 'Not in scheduled time window'
+        success: true,
+        message: 'Today\'s data already exists'
       };
     }
 
@@ -247,11 +249,6 @@ const saveCurrentSupplies = async () => {
       });
 
     const bulkOps = [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
 
     for (const [symbol, circulatingSupply] of uniqueCoins) {
       // Her sembol için o günün kaydı var mı kontrol et
