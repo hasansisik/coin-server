@@ -19,7 +19,7 @@ const authRouter = require("./routers/auth");
 const footerRouter = require("./routers/footerRoutes");
 const supplyHistoryRouter = require("./routers/supplyHistory");
 const coingeckoRouter = require("./routers/coingecko");
-const { saveCurrentSupplies } = require('./controllers/supplyHistory');
+const { saveCurrentSupplies, saveDailyData } = require('./controllers/supplyHistory');
 
 
 //midlleware
@@ -57,36 +57,14 @@ const start = async () => {
   }
 };
 
-// Her 2 saatte bir kontrol et
-cron.schedule('0 */2 * * *', async () => {
-  console.log('Running regular supply history check...');
-  try {
-    const result = await saveCurrentSupplies();
-    console.log('Supply history check result:', result);
-  } catch (error) {
-    console.error('Supply history check failed:', error);
-  }
-});
-
-// Gece yarısı ekstra kontrol
+// Günde bir kez (gece yarısı) veri toplaması çalıştır
 cron.schedule('0 0 * * *', async () => {
-  console.log('Running midnight supply history check...');
+  console.log('Running daily coin data collection...');
   try {
-    const result = await saveCurrentSupplies();
-    console.log('Midnight supply history check result:', result);
+    const result = await saveDailyData();
+    console.log('Daily coin data collection result:', result);
   } catch (error) {
-    console.error('Midnight supply history check failed:', error);
-  }
-});
-
-// Her saat başı kontrol et (0. dakikada)
-cron.schedule('0 * * * *', async () => {
-  console.log('Running hourly supply history check...');
-  try {
-    const result = await saveCurrentSupplies();
-    console.log('Supply history check result:', result);
-  } catch (error) {
-    console.error('Supply history check failed:', error);
+    console.error('Daily coin data collection failed:', error);
   }
 });
 
