@@ -213,23 +213,6 @@ const saveCurrentSupplies = async () => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // Bugün için veri var mı kontrol et
-    const todaysData = await SupplyHistory.findOne({
-      'dailySupplies.timestamp': {
-        $gte: today,
-        $lt: tomorrow
-      }
-    });
-
-    // Eğer bugün için veri varsa işlemi atla
-    if (todaysData) {
-      console.log('Today\'s data already exists, skipping supply data collection...');
-      return {
-        success: true,
-        message: 'Today\'s data already exists'
-      };
-    }
-
     // İlk 500 coin için veri topla (5 sayfa * 100 coin)
     let allMarketData = [];
     let maxPages = 5; // 500 coins
@@ -283,8 +266,8 @@ const saveCurrentSupplies = async () => {
     if (missingSupplyCoins.length > 0) {
       console.log(`Found ${missingSupplyCoins.length} coins missing valid supply data`);
       
-      // Rate limit aşımını önlemek için sınırlı sayıda coin için yeniden dene
-      const retryLimit = 20; // Daha fazla coin için yeniden dene
+      // Tüm eksik coinler için yeniden dene (ancak önceden 20 ile sınırlıydı)
+      const retryLimit = Math.min(100, missingSupplyCoins.length); // 100'e kadar coin için yeniden dene
       const coinsToRetry = missingSupplyCoins.slice(0, retryLimit);
       
       console.log(`Attempting to fetch detailed data for ${coinsToRetry.length} coins...`);
@@ -323,6 +306,35 @@ const saveCurrentSupplies = async () => {
         } catch (error) {
           console.error(`Failed to fetch detailed data for ${coinId}:`, error.message);
           // Bu coin başarısız olsa bile diğerleriyle devam et
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+      }
+    }
+    
+    // İkinci bir kontrol ile hala eksik olan coinleri tekrar dene
+    if (uniqueCoins.size < 480) { // Beklenen 500'ün altındaysa
+      console.log(`Still missing coins. Only have ${uniqueCoins.size} of expected 500. Trying more coins...`);
+      
+      // Henüz denenmemiş coinler için ek sayfalar al
+      for (let page = 6; page <= 8; page++) { // 6, 7, 8. sayfaları dene
+        try {
+          console.log(`Fetching additional market data page ${page}...`);
+          const marketData = await getMarketData(page);
+          
+          for (const coin of marketData) {
+            const symbol = symbolMapping[coin.id] || coin.symbol.toUpperCase();
+            
+            if (!uniqueCoins.has(symbol) && coin.circulating_supply && coin.circulating_supply > 0) {
+              uniqueCoins.set(symbol, coin.circulating_supply);
+              console.log(`Added ${symbol} from additional page ${page}`);
+            }
+          }
+          
+          // Rate limit sorunlarını önlemek için istekler arasında bekleme
+          console.log(`Waiting 15 seconds before next request...`);
+          await new Promise(resolve => setTimeout(resolve, 15000));
+        } catch (error) {
+          console.error(`Failed to fetch additional page ${page}:`, error.message);
           await new Promise(resolve => setTimeout(resolve, 5000));
         }
       }
@@ -405,6 +417,8 @@ const saveCurrentSupplies = async () => {
     console.log(`Found ${recentCoins.size} coins with recent history`);
 
     const bulkOps = [];
+    let newRecords = 0;
+    let updatedRecords = 0;
 
     // Bugünün verileri için toplu işlemi hazırla
     for (const [symbol, circulatingSupply] of uniqueCoins) {
@@ -436,6 +450,7 @@ const saveCurrentSupplies = async () => {
               }
             }
           });
+          newRecords++;
         } else {
           // Hiç kayıt yoksa yeni kayıt oluştur
           bulkOps.push({
@@ -453,13 +468,34 @@ const saveCurrentSupplies = async () => {
               upsert: true
             }
           });
+          newRecords++;
         }
+      } else {
+        // Bugün için zaten kayıt varsa güncelle
+        bulkOps.push({
+          updateOne: {
+            filter: { 
+              symbol, 
+              'dailySupplies.timestamp': {
+                $gte: today,
+                $lt: tomorrow
+              }
+            },
+            update: {
+              $set: {
+                'dailySupplies.$.circulatingSupply': circulatingSupply,
+                'dailySupplies.$.timestamp': new Date()
+              }
+            }
+          }
+        });
+        updatedRecords++;
       }
     }
 
     if (bulkOps.length > 0) {
       const result = await SupplyHistory.bulkWrite(bulkOps);
-      console.log(`Successfully updated/added supply data for ${bulkOps.length} coins`);
+      console.log(`Successfully updated/added supply data for ${bulkOps.length} coins (New: ${newRecords}, Updated: ${updatedRecords})`);
       return {
         success: true,
         message: `Supply history updated. Modified ${result.modifiedCount} records.`
@@ -524,19 +560,6 @@ const getBulkSupplyHistory = async (req, res) => {
 
 const saveDailyCoinData = async () => {
   try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    // Check if we already have data for today
-    const existingData = await CoinData.findOne({ date: { $gte: today } });
-    if (existingData) {
-      console.log('Coin data for today already exists, skipping coin data collection...');
-      return {
-        success: true,
-        message: 'Today\'s coin data already exists'
-      };
-    }
-
     // İlk 500 coini topla (5 sayfa)
     let allCoins = [];
     for (let page = 1; page <= 5; page++) {
@@ -558,21 +581,45 @@ const saveDailyCoinData = async () => {
     
     console.log(`Processing ${allCoins.length} coins for complete data storage...`);
 
-    // Get the existing supply history to calculate changes
+    // Get the existing supply history
     const allSupplyHistories = await SupplyHistory.find({});
     const supplyHistoryMap = {};
     
+    // Son 30 günlük tarih aralığını hesapla
+    const today = new Date();
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+    
+    // Supply geçmişini sembol bazında düzenle
     allSupplyHistories.forEach(history => {
-      // Sort by timestamp descending to get latest first
-      const sortedSupplies = [...history.dailySupplies]
+      // Tarihe göre sırala (son 30 gün)
+      const filteredSupplies = history.dailySupplies
+        .filter(supply => new Date(supply.timestamp) >= thirtyDaysAgo)
         .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       
-      supplyHistoryMap[history.symbol] = sortedSupplies;
+      supplyHistoryMap[history.symbol] = filteredSupplies;
     });
 
     console.log(`Found supply history for ${Object.keys(supplyHistoryMap).length} coins`);
     
-    // Process coins and calculate supply changes
+    // Get the latest coin data record or create a new one if none exists
+    let coinData = await CoinData.findOne().sort({ date: -1 });
+    
+    // Check if we have a record for today
+    const isTodayRecord = coinData && (new Date(coinData.date).toDateString() === today.toDateString());
+    
+    // If no existing data or not from today, create a new record
+    if (!coinData || !isTodayRecord) {
+      coinData = new CoinData({
+        date: new Date(),
+        coins: []
+      });
+      console.log("Creating new coin data record for today");
+    } else {
+      console.log("Updating existing coin data record for today");
+    }
+    
+    // Process coins and add supply history
     let processedCoins = allCoins.map((coin, index) => {
       const symbol = coin.symbol.toUpperCase();
       const supplies = supplyHistoryMap[symbol] || [];
@@ -585,19 +632,80 @@ const saveDailyCoinData = async () => {
         return null;
       }
       
-      // Calculate supply changes for different periods
-      const supplyChange1d = calculateSupplyChange(supplies, currentSupply, 1);
-      const supplyChange1w = calculateSupplyChange(supplies, currentSupply, 7);
-      const supplyChange1m = calculateSupplyChange(supplies, currentSupply, 30);
+      // Bugünün tarih bilgisi
+      const today = new Date();
+      const todayStr = today.toDateString();
+      
+      // Mevcut supplies dizisini al
+      let allSupplies = [];
+      
+      // Eğer bu coin'in mevcut kaydı varsa, onu bul
+      let existingCoin = null;
+      if (isTodayRecord && coinData.coins) {
+        existingCoin = coinData.coins.find(c => c.symbol === symbol);
+      }
+      
+      if (existingCoin && existingCoin.supplies) {
+        allSupplies = [...existingCoin.supplies];
+        
+        // Bugün için kayıt var mı kontrol et
+        const todaySupplyIndex = allSupplies.findIndex(s => 
+          new Date(s.timestamp).toDateString() === todayStr
+        );
+        
+        if (todaySupplyIndex >= 0) {
+          // Bugün için zaten kayıt varsa, onu güncelle
+          console.log(`Updating today's supply record for ${symbol}`);
+          allSupplies[todaySupplyIndex].value = currentSupply;
+          allSupplies[todaySupplyIndex].timestamp = today;
+        } else {
+          // Bugün için kayıt yoksa, yeni ekle
+          console.log(`Adding new supply record for ${symbol}`);
+          allSupplies.push({
+            value: currentSupply,
+            timestamp: today
+          });
+        }
+      } else {
+        // Hiç supply kaydı yoksa, bugünü ekle
+        allSupplies.push({
+          value: currentSupply,
+          timestamp: today
+        });
+        
+        // SupplyHistory'den alınan geçmiş değerleri ekle
+        if (supplies.length > 0) {
+          // Her bir supply için yeni format oluştur ve ekle
+          supplies.forEach(supply => {
+            allSupplies.push({
+              value: supply.circulatingSupply,
+              timestamp: supply.timestamp
+            });
+          });
+        }
+      }
+      
+      // Tekrarlayan kayıtları filtrele - aynı gün için en son değer kalsın
+      const uniqueSupplies = [];
+      const seenDates = new Set();
+      
+      // Zaman damgasına göre sırala (en yeni en önce)
+      allSupplies.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      
+      for (const supply of allSupplies) {
+        const dateStr = new Date(supply.timestamp).toDateString();
+        if (!seenDates.has(dateStr)) {
+          uniqueSupplies.push(supply);
+          seenDates.add(dateStr);
+        }
+      }
 
       // Debug output for specific coins of interest
       if (symbol === 'BNB' || symbol === 'BTC' || symbol === 'ETH') {
         console.log(`Supply data for ${symbol}:`, {
           current: currentSupply,
           supplyHistoryCount: supplies.length,
-          day: supplyChange1d,
-          week: supplyChange1w,
-          month: supplyChange1m
+          suppliesAdded: uniqueSupplies.length
         });
       }
 
@@ -612,9 +720,7 @@ const saveDailyCoinData = async () => {
         circulatingSupply: currentSupply,
         totalSupply: coin.total_supply || coin.circulating_supply,
         maxSupply: coin.max_supply,
-        supplyChange1d,
-        supplyChange1w,
-        supplyChange1m
+        supplies: uniqueSupplies
       };
     });
     
@@ -626,98 +732,27 @@ const saveDailyCoinData = async () => {
       coin.rank = index + 1;
     });
 
-    // Save the coin data for today
-    const coinData = new CoinData({
-      date: new Date(),
-      coins: processedCoins
-    });
+    // If updating existing record, replace the coins array
+    if (isTodayRecord) {
+      coinData.coins = processedCoins;
+      coinData.updatedAt = new Date();
+    } else {
+      // New record with the processed coins
+      coinData.coins = processedCoins;
+    }
     
+    // Save the data
     await coinData.save();
 
-    console.log(`Successfully saved complete data for ${processedCoins.length} coins`);
+    console.log(`Successfully ${isTodayRecord ? 'updated' : 'saved'} complete data for ${processedCoins.length} coins`);
     return {
       success: true,
-      message: `Saved complete coin data for ${processedCoins.length} coins`
+      message: `${isTodayRecord ? 'Updated' : 'Saved'} complete coin data for ${processedCoins.length} coins`
     };
   } catch (error) {
     console.error('Error saving daily coin data:', error);
     throw error;
   }
-};
-
-// Helper function to calculate supply change for a given period
-const calculateSupplyChange = (supplies, currentSupply, days) => {
-  if (!supplies || supplies.length === 0 || !currentSupply || currentSupply <= 0) {
-    return { change: null, supply: null };
-  }
-
-  const targetDate = new Date();
-  targetDate.setDate(targetDate.getDate() - days);
-
-  // Find the supply record closest to the target date
-  let closestSupply = null;
-  let minTimeDiff = Infinity;
-
-  for (const supply of supplies) {
-    const supplyDate = new Date(supply.timestamp);
-    const timeDiff = Math.abs(supplyDate.getTime() - targetDate.getTime());
-    
-    // Kabul edilebilir zaman aralığı (1 hafta)
-    const maxAcceptableTimeDiff = 7 * 24 * 60 * 60 * 1000; // 7 gün
-    
-    // Eğer fark kabul edilebilir aralıktan fazla ise, o kaydı atlama
-    if (timeDiff > maxAcceptableTimeDiff && days <= 7) {
-      continue;
-    }
-    
-    if (timeDiff < minTimeDiff) {
-      minTimeDiff = timeDiff;
-      closestSupply = supply;
-    }
-  }
-
-  // Tarih farkı 30 günden fazlaysa ve aylık değişim hesaplanıyorsa, 
-  // son kayıttan geçerli bir değişim değeri hesapla
-  if (!closestSupply && days === 30 && supplies.length > 0) {
-    closestSupply = supplies[0]; // En son kayıt
-    
-    // Günlük yaklaşık değişim hesapla
-    const dailyChange = (currentSupply - closestSupply.circulatingSupply) / 
-                        (Math.max(1, Math.abs(new Date().getTime() - new Date(closestSupply.timestamp).getTime()) / (24 * 60 * 60 * 1000)));
-    
-    // Aylık değişimi tahmin et
-    const estimatedMonthlyChange = dailyChange * 30;
-    const estimatedPastSupply = currentSupply - estimatedMonthlyChange;
-    
-    if (estimatedPastSupply > 0) {
-      return {
-        change: Math.round(estimatedMonthlyChange),
-        supply: Math.round(estimatedPastSupply)
-      };
-    }
-  }
-
-  if (!closestSupply) {
-    return { change: null, supply: null };
-  }
-
-  const oldSupply = closestSupply.circulatingSupply;
-  
-  // Eğer önceki supply değeri 0 veya geçersizse, değişimi hesaplama
-  if (oldSupply <= 0) {
-    return { change: null, supply: null };
-  }
-  
-  const supplyDifference = Math.round(currentSupply - oldSupply);
-  const actualDays = Math.max(1, Math.abs(new Date().getTime() - new Date(closestSupply.timestamp).getTime()) / (24 * 60 * 60 * 1000));
-  
-  // Log detailed information for debugging
-  console.log(`Supply change for ${days} days: Current=${currentSupply}, Old=${oldSupply}, Diff=${supplyDifference}, ActualDays=${actualDays.toFixed(1)}, Date=${new Date(closestSupply.timestamp).toISOString()}`);
-  
-  return {
-    change: supplyDifference,
-    supply: oldSupply
-  };
 };
 
 // Get coin data by page

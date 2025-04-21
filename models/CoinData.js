@@ -47,36 +47,16 @@ const CoinDataSchema = new mongoose.Schema({
       type: Number,
       default: null
     },
-    supplyChange1d: {
-      change: {
+    supplies: [{
+      value: {
         type: Number,
-        default: null
+        required: true
       },
-      supply: {
-        type: Number,
-        default: null
+      timestamp: {
+        type: Date,
+        default: Date.now
       }
-    },
-    supplyChange1w: {
-      change: {
-        type: Number,
-        default: null
-      },
-      supply: {
-        type: Number,
-        default: null
-      }
-    },
-    supplyChange1m: {
-      change: {
-        type: Number,
-        default: null
-      },
-      supply: {
-        type: Number,
-        default: null
-      }
-    }
+    }]
   }]
 }, {
   timestamps: true

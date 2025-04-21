@@ -57,14 +57,14 @@ const start = async () => {
   }
 };
 
-// Günde bir kez (gece yarısı) veri toplaması çalıştır
-cron.schedule('0 0 * * *', async () => {
-  console.log('Running daily coin data collection...');
+// Günde 6 kez (4 saatte bir) veri toplaması çalıştır
+cron.schedule('0 0,4,8,12,16,20 * * *', async () => {
+  console.log('Running coin data collection...');
   try {
     const result = await saveDailyData();
-    console.log('Daily coin data collection result:', result);
+    console.log('Coin data collection result:', result);
   } catch (error) {
-    console.error('Daily coin data collection failed:', error);
+    console.error('Coin data collection failed:', error);
   }
 });
 
