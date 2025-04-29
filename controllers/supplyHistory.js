@@ -771,7 +771,7 @@ const getCoinData = async (req, res) => {
         message: 'No coin data available'
       });
     }
-    
+
     // Calculate pagination
     const startIndex = (pageNum - 1) * limitNum;
     const endIndex = pageNum * limitNum;
@@ -787,7 +787,7 @@ const getCoinData = async (req, res) => {
     
     // Get the coins for the requested page
     const paginatedCoins = latestData.coins.slice(startIndex, endIndex);
-    
+
     return res.status(StatusCodes.OK).json({
       success: true,
       data: {
@@ -883,14 +883,379 @@ const saveDailyData = async () => {
   }
 };
 
+const saveSplitSupplies = async () => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // İlk 250 coin için veri çek
+    console.log('Fetching first batch of 250 coins...');
+    let firstBatchCoins = [];
+    for (let page = 1; page <= 3; page++) {
+      try {
+        console.log(`Fetching first batch page ${page}/3...`);
+        const marketData = await getMarketData(page);
+        firstBatchCoins = [...firstBatchCoins, ...marketData];
+        
+        // Rate limit sorunlarını önlemek için istekler arasında bekleme
+        if (page < 3) {
+          console.log(`Waiting 15 seconds before next request...`);
+          await new Promise(resolve => setTimeout(resolve, 15000));
+        }
+      } catch (error) {
+        console.error(`Failed to fetch first batch page ${page}:`, error.message);
+        // Bu sayfa başarısız olsa bile diğer sayfalarla devam et
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+    }
+    
+    console.log(`First batch: ${firstBatchCoins.length} coins fetched`);
+    await processAndSaveCoins(firstBatchCoins, today, tomorrow);
+    
+    // İkinci 250 coin için veri çek (15 saniye bekleyerek)
+    console.log('Waiting 15 seconds before fetching second batch...');
+    await new Promise(resolve => setTimeout(resolve, 15000));
+    
+    console.log('Fetching second batch of 250 coins...');
+    let secondBatchCoins = [];
+    for (let page = 4; page <= 6; page++) {
+      try {
+        console.log(`Fetching second batch page ${page}/6...`);
+        const marketData = await getMarketData(page);
+        secondBatchCoins = [...secondBatchCoins, ...marketData];
+        
+        // Rate limit sorunlarını önlemek için istekler arasında bekleme
+        if (page < 6) {
+          console.log(`Waiting 15 seconds before next request...`);
+          await new Promise(resolve => setTimeout(resolve, 15000));
+        }
+      } catch (error) {
+        console.error(`Failed to fetch second batch page ${page}:`, error.message);
+        // Bu sayfa başarısız olsa bile diğer sayfalarla devam et
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+    }
+    
+    console.log(`Second batch: ${secondBatchCoins.length} coins fetched`);
+    await processAndSaveCoins(secondBatchCoins, today, tomorrow);
+    
+    // Önemli coinler için özel kontrol
+    const importantCoins = ['BNB', 'BTC', 'ETH', 'SOL', 'XRP'];
+    await ensureImportantCoins(importantCoins, today, tomorrow);
+    
+    return {
+      success: true,
+      message: `Supply history updated in batches successfully.`
+    };
+  } catch (error) {
+    console.error('Error saving split supplies:', error);
+    throw error;
+  }
+};
+
+// Coin verilerini işleyip veritabanına kaydeden yardımcı fonksiyon
+const processAndSaveCoins = async (marketData, today, tomorrow) => {
+  try {
+    // Symbol eşleştirme için coin ID'lerini al
+    const symbolMapping = await getCoinSymbols();
+    
+    // Coin verilerini işle
+    const uniqueCoins = new Map();
+    marketData.forEach(coin => {
+      const symbol = symbolMapping[coin.id] || coin.symbol.toUpperCase();
+      
+      // Tüm coinler için supply değerini al, geçersizse detaylı veri çekme işlemi için işaretle
+      if (coin.circulating_supply && coin.circulating_supply > 0) {
+        uniqueCoins.set(symbol, coin.circulating_supply);
+      } else {
+        // Supply değeri olmayan veya 0 olan coinleri detaylı verilerle doldurmak için işaretle
+        uniqueCoins.set(symbol, 0);
+      }
+    });
+    
+    // Supply değeri 0 veya null olan coinler için detaylı veri çek
+    const missingSupplyCoins = [];
+    for (const [symbol, supply] of uniqueCoins.entries()) {
+      if (supply <= 0) {
+        // Coin ID'sini bulmaya çalış
+        let coinId = "";
+        for (const [id, sym] of Object.entries(symbolMapping)) {
+          if (sym === symbol) {
+            coinId = id;
+            break;
+          }
+        }
+        
+        if (coinId) {
+          missingSupplyCoins.push({ symbol, coinId });
+        }
+      }
+    }
+    
+    if (missingSupplyCoins.length > 0) {
+      console.log(`Fetching detailed data for ${missingSupplyCoins.length} coins with missing supply...`);
+      
+      for (const { symbol, coinId } of missingSupplyCoins) {
+        try {
+          console.log(`Fetching detailed data for ${symbol} (${coinId})...`);
+          
+          const response = await axios.get(`${COINGECKO_API}/coins/${coinId}`, {
+            params: {
+              localization: false,
+              tickers: false,
+              market_data: true,
+              community_data: false,
+              developer_data: false
+            }
+          });
+          
+          if (response.data && 
+              response.data.market_data && 
+              response.data.market_data.circulating_supply &&
+              response.data.market_data.circulating_supply > 0) {
+            
+            const supply = response.data.market_data.circulating_supply;
+            console.log(`Retrieved supply for ${symbol}: ${supply}`);
+            uniqueCoins.set(symbol, supply);
+          } else {
+            console.log(`No valid supply data found for ${symbol}`);
+          }
+          
+          // Rate limit aşımını önlemek için istekler arasında bekleme
+          await new Promise(resolve => setTimeout(resolve, 10000));
+          
+        } catch (error) {
+          console.error(`Failed to fetch detailed data for ${symbol}:`, error.message);
+          // Bu coin başarısız olsa bile diğerleriyle devam et
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
+      }
+    }
+    
+    const bulkOps = [];
+    let newRecords = 0;
+    let updatedRecords = 0;
+    let skippedRecords = 0;
+
+    // Bugünün verileri için toplu işlemi hazırla
+    for (const [symbol, circulatingSupply] of uniqueCoins.entries()) {
+      // Supply değeri 0 veya null ise kaydetme
+      if (circulatingSupply <= 0) {
+        console.log(`Skipping ${symbol} as it has invalid supply value: ${circulatingSupply}`);
+        skippedRecords++;
+        continue;
+      }
+      
+      // Her sembol için o günün kaydı var mı kontrol et
+      const existingRecord = await SupplyHistory.findOne({
+        symbol,
+        'dailySupplies.timestamp': {
+          $gte: today,
+          $lt: tomorrow
+        }
+      });
+
+      if (!existingRecord) {
+        // Sembol için kayıt var mı kontrol et
+        const symbolRecord = await SupplyHistory.findOne({ symbol });
+
+        if (symbolRecord) {
+          // Mevcut kayıt varsa dailySupplies'a ekle
+          bulkOps.push({
+            updateOne: {
+              filter: { symbol },
+              update: {
+                $push: {
+                  dailySupplies: {
+                    circulatingSupply,
+                    timestamp: new Date()
+                  }
+                }
+              }
+            }
+          });
+          newRecords++;
+        } else {
+          // Hiç kayıt yoksa yeni kayıt oluştur
+          bulkOps.push({
+            updateOne: {
+              filter: { symbol },
+              update: {
+                $set: {
+                  symbol,
+                  dailySupplies: [{
+                    circulatingSupply,
+                    timestamp: new Date()
+                  }]
+                }
+              },
+              upsert: true
+            }
+          });
+          newRecords++;
+        }
+      } else {
+        // Bugün için zaten kayıt varsa güncelle
+        bulkOps.push({
+          updateOne: {
+            filter: { 
+              symbol, 
+              'dailySupplies.timestamp': {
+                $gte: today,
+                $lt: tomorrow
+              }
+            },
+            update: {
+              $set: {
+                'dailySupplies.$.circulatingSupply': circulatingSupply,
+                'dailySupplies.$.timestamp': new Date()
+              }
+            }
+          }
+        });
+        updatedRecords++;
+      }
+    }
+    
+    if (bulkOps.length > 0) {
+      const result = await SupplyHistory.bulkWrite(bulkOps);
+      console.log(`Successfully processed ${uniqueCoins.size} coins (New: ${newRecords}, Updated: ${updatedRecords}, Skipped: ${skippedRecords})`);
+      return result;
+    } else {
+      console.log('No new supply data to add in this batch');
+      return null;
+    }
+  } catch (error) {
+    console.error('Error processing and saving coins:', error);
+    throw error;
+  }
+};
+
+// Önemli coinlerin mutlaka kaydedilmesini sağlayan yardımcı fonksiyon
+const ensureImportantCoins = async (importantCoins, today, tomorrow) => {
+  console.log(`Ensuring important coins are saved: ${importantCoins.join(', ')}...`);
+  
+  for (const symbol of importantCoins) {
+    // Bugün için kaydı var mı kontrol et
+    const existingRecord = await SupplyHistory.findOne({
+      symbol,
+      'dailySupplies.timestamp': {
+        $gte: today,
+        $lt: tomorrow
+      }
+    });
+    
+    if (!existingRecord) {
+      // Bu önemli coin için özel veri çekme
+      try {
+        // Coin ID'sini belirle
+        let coinId;
+        switch(symbol) {
+          case 'BTC': coinId = 'bitcoin'; break;
+          case 'ETH': coinId = 'ethereum'; break;
+          case 'BNB': coinId = 'binancecoin'; break;
+          case 'SOL': coinId = 'solana'; break;
+          case 'XRP': coinId = 'ripple'; break;
+          default: coinId = symbol.toLowerCase();
+        }
+        
+        console.log(`Fetching data for important coin ${symbol} (${coinId})...`);
+        
+        const response = await axios.get(`${COINGECKO_API}/coins/${coinId}`, {
+          params: {
+            localization: false,
+            tickers: false,
+            market_data: true,
+            community_data: false,
+            developer_data: false
+          }
+        });
+        
+        if (response.data && 
+            response.data.market_data && 
+            response.data.market_data.circulating_supply &&
+            response.data.market_data.circulating_supply > 0) {
+          
+          const circulatingSupply = response.data.market_data.circulating_supply;
+          console.log(`Retrieved ${symbol} supply: ${circulatingSupply}`);
+          
+          // Sembol için kayıt var mı kontrol et
+          const symbolRecord = await SupplyHistory.findOne({ symbol });
+          
+          if (symbolRecord) {
+            // Mevcut kayıt varsa dailySupplies'a ekle
+            await SupplyHistory.updateOne(
+              { symbol },
+              {
+                $push: {
+                  dailySupplies: {
+                    circulatingSupply,
+      timestamp: new Date()
+                  }
+                }
+              }
+            );
+          } else {
+            // Hiç kayıt yoksa yeni kayıt oluştur
+            await SupplyHistory.create({
+              symbol,
+              dailySupplies: [{
+                circulatingSupply,
+                timestamp: new Date()
+              }]
+            });
+          }
+          
+          console.log(`Successfully saved ${symbol} with supply ${circulatingSupply}`);
+        } else {
+          console.log(`Could not retrieve valid supply data for ${symbol}`);
+        }
+        
+        // Rate limit aşımını önlemek için istekler arasında bekleme
+        await new Promise(resolve => setTimeout(resolve, 10000));
+
+  } catch (error) {
+        console.error(`Failed to ensure data for ${symbol}:`, error.message);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+    } else {
+      console.log(`${symbol} already has data for today`);
+    }
+  }
+};
+
+// Günlük tüm veri toplama işlemi (parçalı versiyonu kullanıyor)
+const saveSplitDailyData = async () => {
+  try {
+    // Önce supply verilerini iki parça halinde çek ve kaydet
+    await saveSplitSupplies();
+    
+    // Sonra tam coin verilerini kaydet
+    await saveDailyCoinData();
+    
+    return {
+      success: true,
+      message: 'Split daily data saved successfully'
+    };
+  } catch (error) {
+    console.error('Error saving split daily data:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   saveSupplyHistory,
   getSupplyHistory,
   getLatestSupplyHistory,
   saveCurrentSupplies,
+  saveSplitSupplies,
   getBulkSupplyHistory,
   saveDailyCoinData,
   getCoinData,
   getCoinHistory,
-  saveDailyData
+  saveDailyData,
+  saveSplitDailyData
 };

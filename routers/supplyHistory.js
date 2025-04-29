@@ -6,7 +6,8 @@ const {
   getBulkSupplyHistory,
   getCoinData,
   getCoinHistory,
-  saveDailyData
+  saveDailyData,
+  saveSplitDailyData
 } = require("../controllers/supplyHistory");
 
 const router = express.Router();
@@ -25,6 +26,19 @@ router.post("/save-daily", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Error saving daily data",
+      error: error.message
+    });
+  }
+});
+
+router.post("/save-split-daily", async (req, res) => {
+  try {
+    const result = await saveSplitDailyData();
+    res.status(200).json(result);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Error saving split daily data",
       error: error.message
     });
   }
