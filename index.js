@@ -18,6 +18,7 @@ const connectDB = require("./config/connectDB");
 const authRouter = require("./routers/auth");
 const footerRouter = require("./routers/footerRoutes");
 const supplyHistoryRouter = require("./routers/supplyHistory");
+const supplyHistoryDetailsRouter = require("./routers/supplyHistoryDetails");
 const coingeckoRouter = require("./routers/coingecko");
 const { saveCurrentSupplies, saveDailyData } = require('./controllers/supplyHistory');
 
@@ -36,6 +37,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/v1/auth", authRouter);
 app.use("/v1/footer", footerRouter);
 app.use("/v1/supply-history", supplyHistoryRouter);
+app.use("/v1/supply-details", supplyHistoryDetailsRouter);
 app.use("/v1/coingecko", coingeckoRouter);
 
 app.use(notFoundMiddleware);
